@@ -1,0 +1,51 @@
+@import "tailwindcss";
+
+
+:root {
+  /* 🎨 Accent Color (User-controlled) */
+  --primary-color: #4a90e2; /* Default Blue */
+
+  /* ☀️ Light Theme Defaults (used when .dark-theme is NOT present) */
+  --bg-main: #ffffff;
+  --bg-secondary: #f4f4f9;
+  --text-main: #121212;
+  --text-secondary: #555555;
+  --border-color: #dddddd;
+}
+
+/* 🌙 Dark Theme Overrides (applied when the 'dark-theme' class is added to <html>) */
+.dark-theme {
+  --bg-main: #1a202c; /* Deeper Dark Grey */
+  --bg-secondary: #2d3748; /* Slightly lighter dark grey for cards/nav */
+  --text-main: #e2e8f0;    /* Light text */
+  --text-secondary: #a0aec0; /* Lighter secondary text */
+  --border-color: #4a5568;
+}
+
+/* Apply base styles using the variables */
+body {
+  font-family: 'Inter', sans-serif;
+  background-color: var(--bg-main);
+  color: var(--text-main);
+  /* Smooth transition for theme change */
+  transition: background-color 0.3s ease, color 0.3s ease;
+  min-height: 100vh;
+  margin: 0;
+}
+
+/* Reset for the root element */
+#root {
+  margin: 0;
+  padding: 0;
+  max-width: none; 
+}
+
+/* General component styling using primary color */
+button,
+.primary-button {
+  border: none;
+  border-radius: 0.5rem;
+  padding: 0.5rem 1rem;
+  transition: background-color 0.3s ease, opacity 0.3s ease;
+}
+
