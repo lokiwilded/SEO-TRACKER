@@ -1,366 +1,263 @@
-import React, { useState, useEffect, useCallback } from "react";
-import { Trash2, Edit, Loader2 } from 'lucide-react';
-import { useTheme } from "../context/ThemeContext.jsx"; 
-import { toast } from 'react-toastify'; 
+import React, { useState, useEffect, useCallback } from 'react';
+import axios from 'axios';
+import toast, { Toaster, ToastBar } from 'react-hot-toast'; // Make sure Toaster is imported
+import { Loader2, ArrowUp, ArrowDown, Minus, Trash2 } from 'lucide-react';
 
-// Base URL for the backend API
-const API_BASE_URL = 'http://localhost:5000/api/keywords';
+const API_BASE_URL = 'http://localhost:5000/api';
 
-// Helper function to get the current text color class based on theme
-const getTextColor = (currentTheme) => (
-    currentTheme === 'dark' ? 'text-text-main' : 'text-text-main'
-);
+// Helper component to display rank change
+const RankChange = ({ change }) => {
+  if (change === null || change === undefined) {
+    return <span className="text-gray-400">-</span>; // No data yet or wasn't ranked
+  }
+  if (change === 'NC') {
+    return <span className="text-gray-500 flex items-center"><Minus size={12} className="mr-1"/>NC</span>; // No Change
+  }
+  if (change === 'New') {
+    return <span className="text-green-500">New</span>;
+  }
+   if (change === 'Gone') {
+     return <span className="text-red-500">Gone</span>;
+   }
 
+  // Handle numeric changes (+/-)
+  const numericChange = parseInt(change, 10);
+  if (numericChange > 0) {
+    return <span className="text-green-500 flex items-center"><ArrowUp size={12} className="mr-1"/>{Math.abs(numericChange)}</span>; // Improved rank (lower number)
+  }
+  if (numericChange < 0) {
+    return <span className="text-red-500 flex items-center"><ArrowDown size={12} className="mr-1"/>{Math.abs(numericChange)}</span>; // Worsened rank (higher number)
+  }
+
+  return <span className="text-gray-400">-</span>; // Fallback
+};
 
 const KeywordsPage = () => {
-  const { accentColor, theme } = useTheme(); 
-  const textColorClass = getTextColor(theme); 
+  const [newKeywordInput, setNewKeywordInput] = useState(''); // State for adding new keyword
+  // State to hold the detailed ranking data fetched from /api/rankings
+  const [rankingData, setRankingData] = useState([]);
+  const [isLoadingKeywords, setIsLoadingKeywords] = useState(false); // Loading for add/delete
+  const [isLoadingRankings, setIsLoadingRankings] = useState(true); // Separate loading for rankings
+  const [targetUrl, setTargetUrl] = useState(''); // Store target URL for display
+  const [competitorUrls, setCompetitorUrls] = useState([]); // Store competitor URLs for table headers
 
-  const [keywords, setKeywords] = useState([]);
-  const [keywordInput, setKeywordInput] = useState('');
-  
-  // State for initial load (only true on first mount, cleared after first fetch)
-  const [isInitialLoading, setIsInitialLoading] = useState(true); 
-  
-  const [selectedIds, setSelectedIds] = useState(new Set());
-  const [isDeleting, setIsDeleting] = useState(false);
-
-  // --- Data Fetching Function wrapped with useCallback (Stable) ---
-  const fetchKeywords = useCallback(async () => {
+  // Fetch detailed ranking data AND config
+  const fetchRankingData = useCallback(async () => {
+    setIsLoadingRankings(true);
     try {
-      const response = await fetch(API_BASE_URL);
-      const data = await response.json();
-      
-      if (response.ok) {
-        // Set new keyword data directly
-        const sortedKeywords = data.sort((a, b) => a.term.localeCompare(b.term));
-        setKeywords(sortedKeywords); // This instantly updates the table
-      } else {
-        toast.error(`Error loading keywords: ${data.message || 'Server error on load.'}`);
-      }
+      // Fetch config first to get URLs for table headers
+      const configResponse = await axios.get(`${API_BASE_URL}/config`);
+      setTargetUrl(configResponse.data?.url || 'Target URL');
+      setCompetitorUrls(configResponse.data?.competitorUrls || []);
+
+      // Now fetch rankings
+      const rankingsResponse = await axios.get(`${API_BASE_URL}/rankings`);
+      setRankingData(rankingsResponse.data || []);
     } catch (error) {
-      console.error('Network error fetching keywords:', error);
-      toast.error("Error: Could not connect to the backend server (Is it running on port 5000?).");
+      console.error('Error fetching ranking data:', error);
+      toast.error('Failed to load ranking data.');
+      setRankingData([]); // Reset on error
     } finally {
-      // Clear initial loading state once the fetch is complete (regardless of success/failure)
-      setIsInitialLoading(false); 
+      setIsLoadingRankings(false);
     }
-  }, []); // Empty dependency array ensures this function is stable
+  }, []);
 
-  // --- useEffect Hook (Initial Data Load) ---
+  // Fetch ranking data on mount
   useEffect(() => {
-    fetchKeywords();
-  }, [fetchKeywords]); 
-  
-  // --- Keyword Addition Logic (FIXED TOAST RESOLUTION) ---
-  const handleAddKeywords = async (e) => {
-    e.preventDefault();
-    if (!keywordInput.trim()) return;
+    fetchRankingData();
+  }, [fetchRankingData]); // Only fetchRankingData is needed now
 
-    // 1. Create the loading toast
-    const loadingToastId = toast.loading("Adding keywords...");
+  // Handle adding a new keyword
+  const handleAddKeyword = async (e) => {
+    e.preventDefault();
+    const keywordToAdd = newKeywordInput.trim();
+    if (!keywordToAdd) return;
+
+    setIsLoadingKeywords(true);
+    const toastId = toast.loading('Adding keyword...');
 
     try {
-      const response = await fetch(API_BASE_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ keywords: keywordInput }),
+      // Use await directly without assigning to 'response'
+      await axios.post(`${API_BASE_URL}/keywords`, {
+        keyword: keywordToAdd,
       });
-
-      const data = await response.json();
-
-      if (response.ok) {
-        setKeywordInput('');
-        
-        // 1. Update toast to SUCCESS
-        toast.update(loadingToastId, { 
-            render: "Keyword(s) added successfully!", 
-            type: toast.TYPE.SUCCESS, 
-            isLoading: false, 
-            autoClose: 2000 // Toast disappears after 2 seconds
-        });
-        
-        // 2. Trigger fetch, which updates the UI immediately
-        fetchKeywords(); 
-
-      } else {
-        // Server Error Response: Update toast to ERROR (Guaranteed dismissal)
-        toast.update(loadingToastId, { 
-            render: `Error: ${data.message || 'Failed to add keywords'}`, 
-            type: toast.TYPE.ERROR, 
-            isLoading: false, 
-            autoClose: 5000 
-        });
-      }
+      toast.success('Keyword added', { id: toastId, duration: 2000 });
+      setNewKeywordInput('');
+      // Refresh ranking data after adding (new keyword will appear with null ranks)
+      fetchRankingData();
     } catch (error) {
-      console.error('Fetch error:', error);
-      // Network Failure: Update toast to ERROR (Guaranteed dismissal)
-      toast.update(loadingToastId, { 
-          render: "Network error. Could not add keywords.", 
-          type: toast.TYPE.ERROR, 
-          isLoading: false, 
-          autoClose: 5000 
-      });
+      console.error('Error adding keyword:', error);
+      const errorMsg = error.response?.data?.message || 'Failed to add keyword';
+      toast.error(errorMsg, { id: toastId, duration: 3000 });
+    } finally {
+      setIsLoadingKeywords(false);
     }
   };
 
-  // --- Single Keyword Deletion Logic ---
-  const handleDeleteKeyword = (id, term) => {
-    // Show an interactive toast for confirmation
-    toast.warn(
-        ({ closeToast }) => (
-            <div className={`flex flex-col ${textColorClass}`}>
-                <p className="font-semibold">Are you sure you want to delete <span className="font-mono">**{term}**</span>?</p>
-                <button
-                    onClick={() => {
-                        closeToast();
-                        confirmDelete([id]);
-                    }}
-                    // Inject accentColor for button background and theme-dependent text color
-                    style={{ backgroundColor: accentColor, color: theme === 'dark' ? '#121212' : '#ffffff' }} 
-                    className="mt-2 px-3 py-1 rounded-md font-semibold hover:opacity-90 transition"
-                >
-                    Confirm Delete
-                </button>
-            </div>
-        ),
-        {
-            autoClose: false,
-            closeButton: true,
-            draggable: false,
-        }
-    );
-  };
-  
-  // --- Core Deletion Handler ---
-  const confirmDelete = async (idsToDelete) => {
-    setIsDeleting(true);
-    const loadingToastId = toast.loading(`Deleting ${idsToDelete.length} keyword(s)...`);
-    
-    const deletePromises = idsToDelete.map(id => 
-        fetch(`${API_BASE_URL}/${id}`, { method: 'DELETE' })
-    );
+  // Handle deleting a keyword
+  const handleDeleteKeyword = async (id, keywordText) => {
+     if (!window.confirm(`Are you sure you want to delete keyword: "${keywordText}"? This will also remove associated rank history.`)) return;
 
-    const results = await Promise.allSettled(deletePromises);
-
-    const successfullyDeleted = results.filter(r => r.status === 'fulfilled' && r.value.ok).length;
-    
-    setSelectedIds(new Set());
-    
-    // Check if any deletion failed to determine success type
-    if (successfullyDeleted === idsToDelete.length && successfullyDeleted > 0) {
-        toast.update(loadingToastId, { 
-            render: `Keyword(s) deleted successfully.`, // Simplified Message
-            type: toast.TYPE.SUCCESS, 
-            isLoading: false, 
-            autoClose: 2000 // Auto-close after 2 seconds
-        });
-    } else {
-        toast.update(loadingToastId, { 
-            render: `Finished deleting. ${successfullyDeleted} of ${idsToDelete.length} deleted.`, 
-            type: toast.TYPE.WARNING, 
-            isLoading: false, 
-            autoClose: 5000 
-        });
-    }
-
-    // Refresh the list to update the UI
-    fetchKeywords();
-    setIsDeleting(false);
-  };
-
-
-  // --- Multi-Select Handlers ---
-  const isAllSelected = selectedIds.size === keywords.length && keywords.length > 0;
-  
-  const handleSelectAll = () => {
-    if (isAllSelected) {
-      setSelectedIds(new Set());
-    } else {
-      const allIds = new Set(keywords.map(k => k._id));
-      setSelectedIds(allIds);
+    setIsLoadingKeywords(true);
+    const toastId = toast.loading('Deleting keyword...');
+    try {
+      await axios.delete(`${API_BASE_URL}/keywords/${id}`);
+      toast.success('Keyword deleted', { id: toastId, duration: 2000 });
+      // Refresh rankings to remove the deleted keyword's row
+      fetchRankingData();
+    } catch (error) {
+      console.error('Error deleting keyword:', error);
+      toast.error('Failed to delete keyword', { id: toastId, duration: 3000 });
+    } finally {
+      setIsLoadingKeywords(false);
     }
   };
 
-  const handleSelectKeyword = (id) => {
-    setSelectedIds(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(id)) {
-        newSet.delete(id);
-      } else {
-        newSet.add(id);
-      }
-      return newSet;
-    });
-  };
-  
-  const handleBulkDelete = () => {
-      if (selectedIds.size === 0) return;
-      
-      const idsArray = Array.from(selectedIds);
-      
-      toast.warn(
-          ({ closeToast }) => (
-              <div className={`flex flex-col ${textColorClass}`}>
-                  <p className="font-semibold">Confirm deletion of **{idsArray.length}** selected keywords?</p>
-                  <button
-                      onClick={() => {
-                          closeToast();
-                          confirmDelete(idsArray);
-                      }}
-                      style={{ backgroundColor: accentColor, color: theme === 'dark' ? '#121212' : '#ffffff' }}
-                      className="mt-2 px-3 py-1 rounded-md font-semibold hover:opacity-90 transition"
-                      disabled={isDeleting}
-                  >
-                      {isDeleting ? 'Deleting...' : 'Confirm Bulk Delete'}
-                  </button>
-              </div>
-          ),
-          {
-              autoClose: false,
-              closeButton: true,
-              draggable: false,
-          }
-      );
-  };
-
-
-  // --- Placeholder Logic ---
-  const handleEditKeyword = (keyword) => {
-      const newTerm = prompt(`Editing keyword: ${keyword.term}. Enter new term:`, keyword.term);
-      if (newTerm && newTerm.trim() !== keyword.term) {
-          toast.info(`Pretending to save new term: ${newTerm}`);
-      }
-  };
-  
-  const getCurrentRank = () => 'N/A';
-  const getLastUpdated = () => 'Never';
-
+  // Prepare headers for the table dynamically
+  const tableHeaders = [
+    'Keyword',
+    targetUrl && targetUrl !== 'Target URL' ? `${targetUrl} Rank` : 'Target Rank',
+    targetUrl && targetUrl !== 'Target URL' ? `${targetUrl} Change` : 'Target Change',
+    ...competitorUrls.flatMap(url => [`${url} Rank`, `${url} Change`]), // Add competitors
+    'Actions' // Keep Actions column
+  ];
 
   return (
-    <div className="p-8 max-w-7xl mx-auto">
-      <h2 className="text-3xl font-bold mb-6 text-text-main">Keyword Tracker</h2>
-
-      {/* Input Form */}
-      <section className="mb-8 p-6 bg-bg-secondary rounded-lg shadow-xl border border-border-color">
-        <h3 className="text-xl font-semibold mb-4 text-text-main">
-          Add New Keywords
-        </h3>
-        <form onSubmit={handleAddKeywords} className="flex flex-col sm:flex-row space-y-4 sm:space-y-0 sm:space-x-4">
-          <input
-            type="text"
-            value={keywordInput}
-            onChange={(e) => setKeywordInput(e.target.value)}
-            className="flex-grow p-3 border border-border-color rounded-lg focus:ring-2 focus:ring-primary-color bg-bg-main text-text-main"
-            placeholder="Enter keywords, separated by commas (e.g., seo audit, rank tracking, keyword tool)"
-            required
-          />
-          <button
-            type="submit"
-            style={{ backgroundColor: accentColor, color: theme === 'dark' ? '#121212' : '#ffffff' }}
-            className="px-6 py-2 rounded-lg font-bold hover:opacity-90 transition whitespace-nowrap"
-          >
-            Add Keywords
-          </button>
-        </form>
-      </section>
-
-      {/* Keywords Table */}
-      <section>
-        <div className="flex justify-between items-center mb-4">
-            <h3 className="text-xl font-semibold text-text-main">
-              Tracked Keywords ({keywords.length})
-            </h3>
-            {/* Bulk Delete Button */}
-            <button
-                onClick={handleBulkDelete}
-                disabled={selectedIds.size === 0 || isDeleting}
-                style={{ 
-                    backgroundColor: selectedIds.size > 0 ? '#dc3545' : '#6c757d', 
-                    color: '#ffffff'
-                }}
-                className={`px-4 py-2 rounded-lg font-bold transition flex items-center space-x-2 
-                           ${selectedIds.size > 0 ? 'hover:opacity-90' : 'opacity-70 cursor-not-allowed'}`}
-            >
-                <Trash2 size={16} />
-                <span>Delete ({selectedIds.size})</span>
-            </button>
-        </div>
-        
-        {isInitialLoading && keywords.length === 0 ? (
-            <div className="flex items-center space-x-2 text-text-secondary p-4">
-                <Loader2 className="animate-spin w-5 h-5" />
-                <p>Loading keywords...</p>
-            </div>
-        ) : keywords.length === 0 ? (
-            <p className="text-text-secondary p-4">Start by adding your first keyword!</p>
-        ) : (
-            <div className="overflow-x-auto border border-border-color rounded-lg shadow-md">
-                <table className="min-w-full divide-y divide-border-color">
-                    <thead className="bg-bg-secondary">
-                        <tr>
-                            {/* Select All Checkbox */}
-                            <th className="px-3 py-3 w-10">
-                                <input
-                                    type="checkbox"
-                                    checked={isAllSelected}
-                                    onChange={handleSelectAll}
-                                    className="rounded text-primary-color bg-bg-main border-border-color focus:ring-primary-color"
-                                />
-                            </th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider">Keyword</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider">Current Rank (Target)</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider">Last Updated</th>
-                            <th className="px-6 py-3 text-right text-xs font-medium text-text-secondary uppercase tracking-wider">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border-color">
-                        {keywords.map((keyword) => (
-                            <tr 
-                                key={keyword._id} 
-                                className={`bg-bg-main transition duration-150 ${selectedIds.has(keyword._id) ? 'bg-bg-secondary/70' : 'hover:bg-bg-secondary/50'}`}
-                            >
-                                {/* Individual Select Checkbox */}
-                                <td className="px-3 py-4 w-10">
-                                    <input
-                                        type="checkbox"
-                                        checked={selectedIds.has(keyword._id)}
-                                        onChange={() => handleSelectKeyword(keyword._id)}
-                                        className="rounded text-primary-color bg-bg-main border-border-color focus:ring-primary-color"
-                                    />
-                                </td>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-text-main">{keyword.term}</td>
-                                
-                                <td className="px-6 py-4 whitespace-nowrap text-sm text-text-secondary">
-                                    {getCurrentRank(keyword.historicalRankings)}
-                                </td>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm text-text-secondary">
-                                    {getLastUpdated(keyword.historicalRankings)}
-                                </td>
-                                
-                                <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-2">
-                                    <button
-                                        onClick={() => handleEditKeyword(keyword)}
-                                        className="text-accent-primary hover:opacity-75 p-1 rounded transition"
-                                        title="Edit Keyword"
-                                    >
-                                        <Edit size={16} />
-                                    </button>
-                                    <button
-                                        onClick={() => handleDeleteKeyword(keyword._id, keyword.term)}
-                                        className="text-red-500 hover:bg-red-100 dark:hover:bg-red-900 p-1 rounded transition"
-                                        title="Delete Keyword"
-                                    >
-                                        <Trash2 size={16} />
-                                    </button>
-                                </td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
-            </div>
+    <div className="container mx-auto p-4">
+      {/* Toaster for notifications */}
+      <Toaster>
+        {(t) => (
+          <ToastBar toast={t}>
+            {({ icon, message }) => (
+              <>
+                {icon}
+                {message}
+                {t.type !== 'loading' && t.duration > 0 && (
+                  <div className="toast-timer-bar" style={{ animationDuration: `${t.duration}ms` }} />
+                )}
+              </>
+            )}
+          </ToastBar>
         )}
-      </section>
+      </Toaster>
+
+      <h1 className="text-2xl font-bold mb-4">Keywords & Rankings</h1>
+
+      {/* Form to add new keyword */}
+      <form onSubmit={handleAddKeyword} className="mb-4 flex flex-col sm:flex-row sm:space-x-2">
+        <input
+          type="text"
+          value={newKeywordInput}
+          onChange={(e) => setNewKeywordInput(e.target.value)}
+          placeholder="Enter a new keyword"
+          className="shadow appearance-none border rounded w-full py-2 px-3 text-[--text-main] bg-[--background] leading-tight focus:outline-none focus:shadow-outline mb-2 sm:mb-0 flex-grow"
+          disabled={isLoadingKeywords}
+        />
+        <button
+          type="submit"
+          className="bg-accent hover:bg-opacity-80 text-text-main font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline disabled:opacity-50"
+          disabled={isLoadingKeywords}
+        >
+          {isLoadingKeywords ? <Loader2 className="animate-spin w-5 h-5 inline mr-2"/> : null}
+          {isLoadingKeywords ? 'Adding...' : 'Add Keyword'}
+        </button>
+      </form>
+
+      {/* Keyword & Ranking Table */}
+      <div className="overflow-x-auto shadow-md rounded-lg border border-border-color">
+        <table className="min-w-full bg-background ">
+          <thead className="bg-bg-secondary sticky top-0"> {/* Make header sticky */}
+            <tr>
+              {tableHeaders.map((header, index) => (
+                <th key={index} className="py-3 px-4 border-b dark:border-gray-700 text-left text-xs sm:text-sm font-medium text-text-secondary uppercase tracking-wider whitespace-nowrap">
+                  {header}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {isLoadingRankings ? (
+              <tr>
+                <td colSpan={tableHeaders.length} className="py-4 px-4 text-center text-gray-500">
+                  <Loader2 className="animate-spin w-5 h-5 inline mr-2" /> Loading ranking data...
+                </td>
+              </tr>
+            ) : rankingData.length === 0 ? (
+              <tr>
+                <td colSpan={tableHeaders.length} className="py-4 px-4 text-center text-gray-500 italic">
+                  No keywords added or no ranking data available yet. Add keywords and run the rank checker.
+                </td>
+              </tr>
+            ) : (
+              rankingData.map((row) => (
+                <tr key={row.keywordId} className="hover:bg-bg-secondary transition-colors duration-150">
+                  {/* Keyword Text */}
+                  <td className="py-3 px-4 border-b dark:border-gray-700 text-sm font-medium text-text-main whitespace-nowrap">
+                    {row.keywordText}
+                  </td>
+                  {/* Target URL Rank & Change */}
+                  {targetUrl && targetUrl !== 'Target URL' && ( // Check if targetUrl is set
+                      <>
+                          <td className="py-3 px-4 border-b dark:border-gray-700 text-sm text-text-secondary whitespace-nowrap text-center">
+                              {row.urlData.find(d => d.isTarget)?.currentRank ?? <span className="text-gray-400">-</span>}
+                          </td>
+                          <td className="py-3 px-4 border-b dark:border-gray-700 text-sm text-text-secondary whitespace-nowrap text-center">
+                              <RankChange change={row.urlData.find(d => d.isTarget)?.change} />
+                          </td>
+                      </>
+                  )}
+                   {/* Handle case where target URL isn't set yet */}
+                   {(!targetUrl || targetUrl === 'Target URL') && (
+                       <>
+                           <td className="py-3 px-4 border-b dark:border-gray-700 text-sm text-text-secondary whitespace-nowrap text-center"><span className="text-gray-400">-</span></td>
+                           <td className="py-3 px-4 border-b dark:border-gray-700 text-sm text-text-secondary whitespace-nowrap text-center"><span className="text-gray-400">-</span></td>
+                       </>
+                   )}
+                  {/* Competitor URLs Rank & Change */}
+                  {competitorUrls.map(compUrl => {
+                      const compData = row.urlData.find(d => d.url === compUrl);
+                      return (
+                          <React.Fragment key={compUrl}>
+                              <td className="py-3 px-4 border-b dark:border-gray-700 text-sm text-text-secondary whitespace-nowrap text-center">
+                                  {compData?.currentRank ?? <span className="text-gray-400">-</span>}
+                              </td>
+                              <td className="py-3 px-4 border-b dark:border-gray-700 text-sm text-text-secondary whitespace-nowrap text-center">
+                                  <RankChange change={compData?.change} />
+                              </td>
+                          </React.Fragment>
+                      );
+                  })}
+
+                  {/* Actions */}
+                  <td className="py-3 px-4 border-b dark:border-gray-700 text-sm whitespace-nowrap">
+                    <button
+                      onClick={() => handleDeleteKeyword(row.keywordId, row.keywordText)}
+                      className="text-red-500 hover:text-red-700 disabled:opacity-50"
+                      disabled={isLoadingKeywords}
+                      title="Delete Keyword"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+       {/* Button to manually trigger rank check (placeholder for now) */}
+       <div className="mt-6">
+           <button
+             // onClick={handleTriggerRankCheck} // Add this function later
+             className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline disabled:opacity-50"
+             // disabled={isLoadingRankings || isLoadingKeywords} // Disable if anything is loading
+             disabled // Disabled until function is implemented
+           >
+             {/* {isCheckingRanks ? <Loader2 className="animate-spin w-5 h-5 inline mr-2"/> : null} */}
+             Check Rankings Now (Not Implemented)
+           </button>
+           <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Manually trigger Scraperdog to fetch latest ranks.</p>
+       </div>
     </div>
   );
 };

@@ -49,3 +49,25 @@ button,
   transition: background-color 0.3s ease, opacity 0.3s ease;
 }
 
+.custom-success-toast {
+  background-color: var(--primary-color) !important; /* Use the accent color variable */
+  color: var(--toast-text-color) !important; /* Define a text color variable */
+  /* Add any other styles like padding, border-radius if needed */
+  border-radius: 8px; /* Example */
+  box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1); /* Example shadow */
+}
+
+/* Define text color based on theme */
+html:not(.dark-theme) .custom-success-toast {
+  --toast-text-color: #121212; /* Or your light theme main text */
+}
+
+html.dark-theme .custom-success-toast {
+  --toast-text-color: #FFFFFF; /* Or your dark theme main text */
+}
+
+/* Optional: Style the progress bar if needed */
+.custom-success-toast .Toastify__progress-bar {
+  background: var(--toast-text-color) !important; /* Make it contrast */
+  opacity: 0.6;
+}
