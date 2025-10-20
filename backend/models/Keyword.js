@@ -1,40 +1,15 @@
+// backend/models/Keyword.js
 const mongoose = require('mongoose');
+const Schema = mongoose.Schema; // Good practice to alias Schema
 
-// Sub-schema for a single historical ranking entry
-const rankingSchema = new mongoose.Schema({
-  // We will link this to the correct URL document (TargetUrl or CompetitorUrl)
-  urlId: {
-    type: mongoose.Schema.Types.ObjectId,
-    required: true,
-  },
-  rank: {
-    type: Number,
-    required: true,
-  },
-  date: {
-    type: Date,
-    default: Date.now,
-    required: true,
-  },
-});
-
-const keywordSchema = new mongoose.Schema({
-  term: {
+const keywordSchema = new Schema({
+  keyword: {
     type: String,
     required: true,
-    unique: true, // Ensures no duplicate keywords
     trim: true,
-    index: true,
-  },
-  // Array to store historical rankings across all tracked URLs
-  historicalRankings: [rankingSchema],
-  addedOn: {
-    type: Date,
-    default: Date.now,
-  },
-});
+    unique: true // Ensures keywords are not duplicated
+  }
+}, { timestamps: true }); // Added timestamps, good for tracking
 
-// Mongoose will pluralize this to the 'keywords' collection
-const Keyword = mongoose.model('Keyword', keywordSchema);
-
-module.exports = Keyword;
+// This is the crucial line that creates and exports the model
+module.exports = mongoose.model('Keyword', keywordSchema);

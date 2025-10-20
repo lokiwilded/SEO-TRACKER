@@ -1,20 +1,18 @@
-// backend/models/TargetUrl.js
+// backend/models/Urls.js
 const mongoose = require('mongoose');
+const Schema = mongoose.Schema;
 
-const targetUrlSchema = new mongoose.Schema({
+const urlsSchema = new Schema({
   url: {
     type: String,
     required: true,
-    trim: true // Good practice
-    // Consider adding unique: true if you really enforce only one document
+    trim: true
   },
-  competitorUrls: [{ // Store competitor URLs directly here
+  competitorUrls: [{
     type: String,
     trim: true
   }]
-}, { timestamps: true }); // Add timestamps
+}, { timestamps: true });
 
-// Ensure only one document can exist if strictly needed (optional, depends on API logic)
-// targetUrlSchema.index({ url: 1 }, { unique: true }); // Careful with this if url can change
-
-module.exports = mongoose.model('TargetUrl', targetUrlSchema);
+// Ensure this file also exports the model
+module.exports = mongoose.model('Urls', urlsSchema); // Use 'Urls' here to match your server.js

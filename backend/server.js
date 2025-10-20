@@ -29,32 +29,35 @@ app.post('/api/keywords', async (req, res) => {
     if (!keyword) {
       return res.status(400).json({ message: 'Keyword is required' });
     }
+
+    const trimmedKeyword = keyword.trim();
+    console.log(`[LOG] Received keyword: "${keyword}", trimmed to: "${trimmedKeyword}"`); // <-- ADDED LOG
+
     // Optional: Add validation to prevent duplicates if needed
-    const existingKeyword = await Keyword.findOne({ keyword: keyword.trim() });
+    const existingKeyword = await Keyword.findOne({ keyword: trimmedKeyword });
+    
+    // <-- ADDED LOGS to see what findOne returns
     if (existingKeyword) {
-        return res.status(409).json({ message: 'Keyword already exists' });
+      console.log(`[LOG] Found existing keyword:`, JSON.stringify(existingKeyword, null, 2));
+      return res.status(409).json({ message: 'Keyword already exists' });
+    } else {
+      console.log(`[LOG] No existing keyword found for "${trimmedKeyword}". Proceeding to save...`);
     }
 
-    const newKeyword = new Keyword({ keyword: keyword.trim() });
+    const newKeyword = new Keyword({ keyword: trimmedKeyword });
     await newKeyword.save();
+    
+    console.log(`[LOG] Successfully saved new keyword:`, JSON.stringify(newKeyword, null, 2)); // <-- ADDED LOG
+
     res.status(201).json(newKeyword);
+
   } catch (error) {
      if (error.code === 11000) { // Should be caught above, but as a fallback
+       console.error('[ERROR] Duplicate key error (11000):', error.message); // <-- ADDED LOG
        return res.status(409).json({ message: 'Keyword already exists' });
      }
-    console.error('Error adding keyword:', error);
+    console.error('Error adding keyword:', error); // <-- This will catch other errors
     res.status(500).json({ message: 'Server error adding keyword' });
-  }
-});
-
-// GET /api/keywords
-app.get('/api/keywords', async (req, res) => {
-  try {
-    const keywords = await Keyword.find();
-    res.json(keywords);
-  } catch (error) {
-    console.error('Error fetching keywords:', error);
-    res.status(500).json({ message: 'Server error fetching keywords' });
   }
 });
 

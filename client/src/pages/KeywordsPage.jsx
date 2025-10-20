@@ -1,17 +1,18 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
-import toast, { Toaster, ToastBar } from 'react-hot-toast'; // Make sure Toaster is imported
+import toast, { Toaster, ToastBar } from 'react-hot-toast';
 import { Loader2, ArrowUp, ArrowDown, Minus, Trash2 } from 'lucide-react';
+import { useTheme } from '../context/ThemeContext.jsx'; // Import useTheme
 
 const API_BASE_URL = 'http://localhost:5000/api';
 
 // Helper component to display rank change
 const RankChange = ({ change }) => {
   if (change === null || change === undefined) {
-    return <span className="text-gray-400">-</span>; // No data yet or wasn't ranked
+    return <span className="text-gray-400">-</span>;
   }
   if (change === 'NC') {
-    return <span className="text-gray-500 flex items-center"><Minus size={12} className="mr-1"/>NC</span>; // No Change
+    return <span className="text-gray-500 flex items-center"><Minus size={12} className="mr-1"/>NC</span>;
   }
   if (change === 'New') {
     return <span className="text-green-500">New</span>;
@@ -19,55 +20,47 @@ const RankChange = ({ change }) => {
    if (change === 'Gone') {
      return <span className="text-red-500">Gone</span>;
    }
-
-  // Handle numeric changes (+/-)
   const numericChange = parseInt(change, 10);
   if (numericChange > 0) {
-    return <span className="text-green-500 flex items-center"><ArrowUp size={12} className="mr-1"/>{Math.abs(numericChange)}</span>; // Improved rank (lower number)
+    return <span className="text-green-500 flex items-center"><ArrowUp size={12} className="mr-1"/>{Math.abs(numericChange)}</span>;
   }
   if (numericChange < 0) {
-    return <span className="text-red-500 flex items-center"><ArrowDown size={12} className="mr-1"/>{Math.abs(numericChange)}</span>; // Worsened rank (higher number)
+    return <span className="text-red-500 flex items-center"><ArrowDown size={12} className="mr-1"/>{Math.abs(numericChange)}</span>;
   }
-
-  return <span className="text-gray-400">-</span>; // Fallback
+  return <span className="text-gray-400">-</span>;
 };
 
 const KeywordsPage = () => {
-  const [newKeywordInput, setNewKeywordInput] = useState(''); // State for adding new keyword
-  // State to hold the detailed ranking data fetched from /api/rankings
+  const { accentColor, theme } = useTheme(); // Get accentColor and theme
+  const [newKeywordInput, setNewKeywordInput] = useState('');
   const [rankingData, setRankingData] = useState([]);
-  const [isLoadingKeywords, setIsLoadingKeywords] = useState(false); // Loading for add/delete
-  const [isLoadingRankings, setIsLoadingRankings] = useState(true); // Separate loading for rankings
-  const [targetUrl, setTargetUrl] = useState(''); // Store target URL for display
-  const [competitorUrls, setCompetitorUrls] = useState([]); // Store competitor URLs for table headers
+  const [isLoadingKeywords, setIsLoadingKeywords] = useState(false);
+  const [isLoadingRankings, setIsLoadingRankings] = useState(true);
+  const [targetUrl, setTargetUrl] = useState('');
+  const [competitorUrls, setCompetitorUrls] = useState([]);
 
-  // Fetch detailed ranking data AND config
   const fetchRankingData = useCallback(async () => {
     setIsLoadingRankings(true);
     try {
-      // Fetch config first to get URLs for table headers
       const configResponse = await axios.get(`${API_BASE_URL}/config`);
       setTargetUrl(configResponse.data?.url || 'Target URL');
       setCompetitorUrls(configResponse.data?.competitorUrls || []);
 
-      // Now fetch rankings
       const rankingsResponse = await axios.get(`${API_BASE_URL}/rankings`);
       setRankingData(rankingsResponse.data || []);
     } catch (error) {
       console.error('Error fetching ranking data:', error);
       toast.error('Failed to load ranking data.');
-      setRankingData([]); // Reset on error
+      setRankingData([]);
     } finally {
       setIsLoadingRankings(false);
     }
   }, []);
 
-  // Fetch ranking data on mount
   useEffect(() => {
     fetchRankingData();
-  }, [fetchRankingData]); // Only fetchRankingData is needed now
+  }, [fetchRankingData]);
 
-  // Handle adding a new keyword
   const handleAddKeyword = async (e) => {
     e.preventDefault();
     const keywordToAdd = newKeywordInput.trim();
@@ -77,13 +70,11 @@ const KeywordsPage = () => {
     const toastId = toast.loading('Adding keyword...');
 
     try {
-      // Use await directly without assigning to 'response'
       await axios.post(`${API_BASE_URL}/keywords`, {
         keyword: keywordToAdd,
       });
       toast.success('Keyword added', { id: toastId, duration: 2000 });
       setNewKeywordInput('');
-      // Refresh ranking data after adding (new keyword will appear with null ranks)
       fetchRankingData();
     } catch (error) {
       console.error('Error adding keyword:', error);
@@ -94,7 +85,6 @@ const KeywordsPage = () => {
     }
   };
 
-  // Handle deleting a keyword
   const handleDeleteKeyword = async (id, keywordText) => {
      if (!window.confirm(`Are you sure you want to delete keyword: "${keywordText}"? This will also remove associated rank history.`)) return;
 
@@ -103,7 +93,6 @@ const KeywordsPage = () => {
     try {
       await axios.delete(`${API_BASE_URL}/keywords/${id}`);
       toast.success('Keyword deleted', { id: toastId, duration: 2000 });
-      // Refresh rankings to remove the deleted keyword's row
       fetchRankingData();
     } catch (error) {
       console.error('Error deleting keyword:', error);
@@ -113,18 +102,16 @@ const KeywordsPage = () => {
     }
   };
 
-  // Prepare headers for the table dynamically
   const tableHeaders = [
     'Keyword',
     targetUrl && targetUrl !== 'Target URL' ? `${targetUrl} Rank` : 'Target Rank',
     targetUrl && targetUrl !== 'Target URL' ? `${targetUrl} Change` : 'Target Change',
-    ...competitorUrls.flatMap(url => [`${url} Rank`, `${url} Change`]), // Add competitors
-    'Actions' // Keep Actions column
+    ...competitorUrls.flatMap(url => [`${url} Rank`, `${url} Change`]),
+    'Actions'
   ];
 
   return (
     <div className="container mx-auto p-4">
-      {/* Toaster for notifications */}
       <Toaster>
         {(t) => (
           <ToastBar toast={t}>
@@ -143,7 +130,6 @@ const KeywordsPage = () => {
 
       <h1 className="text-2xl font-bold mb-4">Keywords & Rankings</h1>
 
-      {/* Form to add new keyword */}
       <form onSubmit={handleAddKeyword} className="mb-4 flex flex-col sm:flex-row sm:space-x-2">
         <input
           type="text"
@@ -155,7 +141,11 @@ const KeywordsPage = () => {
         />
         <button
           type="submit"
-          className="bg-accent hover:bg-opacity-80 text-text-main font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline disabled:opacity-50"
+          style={{
+            backgroundColor: accentColor,
+            color: theme === 'dark' ? '#000000' : '#FFFFFF'
+          }}
+          className="font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline disabled:opacity-50 hover:opacity-90 transition-opacity"
           disabled={isLoadingKeywords}
         >
           {isLoadingKeywords ? <Loader2 className="animate-spin w-5 h-5 inline mr-2"/> : null}
@@ -166,7 +156,7 @@ const KeywordsPage = () => {
       {/* Keyword & Ranking Table */}
       <div className="overflow-x-auto shadow-md rounded-lg border border-border-color">
         <table className="min-w-full bg-background ">
-          <thead className="bg-bg-secondary sticky top-0"> {/* Make header sticky */}
+          <thead className="bg-bg-secondary sticky top-0">
             <tr>
               {tableHeaders.map((header, index) => (
                 <th key={index} className="py-3 px-4 border-b dark:border-gray-700 text-left text-xs sm:text-sm font-medium text-text-secondary uppercase tracking-wider whitespace-nowrap">
@@ -191,12 +181,10 @@ const KeywordsPage = () => {
             ) : (
               rankingData.map((row) => (
                 <tr key={row.keywordId} className="hover:bg-bg-secondary transition-colors duration-150">
-                  {/* Keyword Text */}
                   <td className="py-3 px-4 border-b dark:border-gray-700 text-sm font-medium text-text-main whitespace-nowrap">
                     {row.keywordText}
                   </td>
-                  {/* Target URL Rank & Change */}
-                  {targetUrl && targetUrl !== 'Target URL' && ( // Check if targetUrl is set
+                  {targetUrl && targetUrl !== 'Target URL' ? (
                       <>
                           <td className="py-3 px-4 border-b dark:border-gray-700 text-sm text-text-secondary whitespace-nowrap text-center">
                               {row.urlData.find(d => d.isTarget)?.currentRank ?? <span className="text-gray-400">-</span>}
@@ -205,15 +193,12 @@ const KeywordsPage = () => {
                               <RankChange change={row.urlData.find(d => d.isTarget)?.change} />
                           </td>
                       </>
-                  )}
-                   {/* Handle case where target URL isn't set yet */}
-                   {(!targetUrl || targetUrl === 'Target URL') && (
+                  ) : (
                        <>
                            <td className="py-3 px-4 border-b dark:border-gray-700 text-sm text-text-secondary whitespace-nowrap text-center"><span className="text-gray-400">-</span></td>
                            <td className="py-3 px-4 border-b dark:border-gray-700 text-sm text-text-secondary whitespace-nowrap text-center"><span className="text-gray-400">-</span></td>
                        </>
                    )}
-                  {/* Competitor URLs Rank & Change */}
                   {competitorUrls.map(compUrl => {
                       const compData = row.urlData.find(d => d.url === compUrl);
                       return (
@@ -227,8 +212,6 @@ const KeywordsPage = () => {
                           </React.Fragment>
                       );
                   })}
-
-                  {/* Actions */}
                   <td className="py-3 px-4 border-b dark:border-gray-700 text-sm whitespace-nowrap">
                     <button
                       onClick={() => handleDeleteKeyword(row.keywordId, row.keywordText)}
@@ -245,15 +228,18 @@ const KeywordsPage = () => {
           </tbody>
         </table>
       </div>
-       {/* Button to manually trigger rank check (placeholder for now) */}
+       
+       {/* Button to manually trigger rank check */}
        <div className="mt-6">
            <button
              // onClick={handleTriggerRankCheck} // Add this function later
-             className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline disabled:opacity-50"
-             // disabled={isLoadingRankings || isLoadingKeywords} // Disable if anything is loading
+             style={{
+                backgroundColor: accentColor,
+                color: theme === 'dark' ? '#000000' : '#FFFFFF'
+             }}
+             className="font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline disabled:opacity-50 hover:opacity-90 transition-opacity"
              disabled // Disabled until function is implemented
            >
-             {/* {isCheckingRanks ? <Loader2 className="animate-spin w-5 h-5 inline mr-2"/> : null} */}
              Check Rankings Now (Not Implemented)
            </button>
            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Manually trigger Scraperdog to fetch latest ranks.</p>
