@@ -30,17 +30,20 @@ const RankChange = ({ change }) => {
   return <span className="text-gray-400">-</span>;
 };
 
+
 const KeywordsPage = () => {
   const { accentColor, theme } = useTheme(); // Get accentColor and theme
   const [newKeywordInput, setNewKeywordInput] = useState('');
   const [rankingData, setRankingData] = useState([]);
   const [isLoadingKeywords, setIsLoadingKeywords] = useState(false);
   const [isLoadingRankings, setIsLoadingRankings] = useState(true);
+  const [isCheckingRanks, setIsCheckingRanks] = useState(false); // State for scrape button
   const [targetUrl, setTargetUrl] = useState('');
   const [competitorUrls, setCompetitorUrls] = useState([]);
 
-  const fetchRankingData = useCallback(async () => {
-    setIsLoadingRankings(true);
+  // Added optional param to prevent full-page loader on refreshes
+  const fetchRankingData = useCallback(async (showLoading = true) => {
+    if (showLoading) setIsLoadingRankings(true);
     try {
       const configResponse = await axios.get(`${API_BASE_URL}/config`);
       setTargetUrl(configResponse.data?.url || 'Target URL');
@@ -53,12 +56,12 @@ const KeywordsPage = () => {
       toast.error('Failed to load ranking data.');
       setRankingData([]);
     } finally {
-      setIsLoadingRankings(false);
+      if (showLoading) setIsLoadingRankings(false);
     }
   }, []);
 
   useEffect(() => {
-    fetchRankingData();
+    fetchRankingData(true); // Show loading only on initial mount
   }, [fetchRankingData]);
 
   const handleAddKeyword = async (e) => {
@@ -75,7 +78,7 @@ const KeywordsPage = () => {
       });
       toast.success('Keyword added', { id: toastId, duration: 2000 });
       setNewKeywordInput('');
-      fetchRankingData();
+      fetchRankingData(false); // Refresh data without full page loader
     } catch (error) {
       console.error('Error adding keyword:', error);
       const errorMsg = error.response?.data?.message || 'Failed to add keyword';
@@ -93,7 +96,7 @@ const KeywordsPage = () => {
     try {
       await axios.delete(`${API_BASE_URL}/keywords/${id}`);
       toast.success('Keyword deleted', { id: toastId, duration: 2000 });
-      fetchRankingData();
+      fetchRankingData(false); // Refresh data without full page loader
     } catch (error) {
       console.error('Error deleting keyword:', error);
       toast.error('Failed to delete keyword', { id: toastId, duration: 3000 });
@@ -102,6 +105,31 @@ const KeywordsPage = () => {
     }
   };
 
+  // --- NEW FUNCTION ---
+  const handleTriggerRankCheck = async () => {
+    setIsCheckingRanks(true);
+    const toastId = toast.loading('Starting rank check job...');
+    try {
+      const response = await axios.post(`${API_BASE_URL}/check-ranks`);
+      toast.success(response.data.message, { id: toastId, duration: 3000 });
+      
+      toast.loading('Scraping in background... Data will refresh in ~30s');
+      
+      // Clear checking state after 30s and refresh data
+      setTimeout(() => {
+        fetchRankingData(false); // Refresh data without full loader
+        toast.dismiss(); // Clear the "Scraping..." message
+        toast.success('Ranking data refreshed!');
+        setIsCheckingRanks(false); // Re-enable button
+      }, 30000); // Wait 30 seconds (adjust as needed based on keyword count)
+
+    } catch (error) {
+      console.error('Error triggering rank check:', error);
+      toast.error('Failed to start rank check job.', { id: toastId, duration: 3000 });
+      setIsCheckingRanks(false); // Re-enable button on failure
+    }
+  };
+  
   const tableHeaders = [
     'Keyword',
     targetUrl && targetUrl !== 'Target URL' ? `${targetUrl} Rank` : 'Target Rank',
@@ -232,15 +260,16 @@ const KeywordsPage = () => {
        {/* Button to manually trigger rank check */}
        <div className="mt-6">
            <button
-             // onClick={handleTriggerRankCheck} // Add this function later
+             onClick={handleTriggerRankCheck} // Assign the new handler
              style={{
                 backgroundColor: accentColor,
                 color: theme === 'dark' ? '#000000' : '#FFFFFF'
              }}
              className="font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline disabled:opacity-50 hover:opacity-90 transition-opacity"
-             disabled // Disabled until function is implemented
+             disabled={isCheckingRanks || isLoadingRankings || isLoadingKeywords} // Disable if any job is running
            >
-             Check Rankings Now (Not Implemented)
+             {isCheckingRanks ? <Loader2 className="animate-spin w-5 h-5 inline mr-2"/> : null}
+             {isCheckingRanks ? 'Checking...' : 'Check Rankings Now'}
            </button>
            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Manually trigger Scraperdog to fetch latest ranks.</p>
        </div>

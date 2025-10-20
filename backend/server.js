@@ -2,11 +2,16 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const dotenv = require('dotenv');
-const Keyword = require('./models/Keyword'); // Keep this
-const TargetUrl = require('./models/Urls'); 
-const RankingData = require('./models/RankingData');
 
-dotenv.config();
+// --- FIX 1: Load dotenv at the very top ---
+dotenv.config(); 
+
+// --- All other imports must come AFTER dotenv.config() ---
+const Keyword = require('./models/Keyword');
+const TargetUrl = require('./models/Urls');
+const RankingData = require('./models/RankingData');
+const { checkAllKeywords } = require('./utils/rankChecker.js'); 
+const axios = require('axios');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -21,8 +26,7 @@ mongoose.connect(MONGO_URI)
   .then(() => console.log('MongoDB Connected'))
   .catch(err => console.error('MongoDB connection error:', err));
 
-// --- Keyword Routes (Keep as they are for now) ---
-// POST /api/keywords
+// --- Keyword Routes ---
 app.post('/api/keywords', async (req, res) => {
   try {
     const { keyword } = req.body;
@@ -31,12 +35,10 @@ app.post('/api/keywords', async (req, res) => {
     }
 
     const trimmedKeyword = keyword.trim();
-    console.log(`[LOG] Received keyword: "${keyword}", trimmed to: "${trimmedKeyword}"`); // <-- ADDED LOG
+    console.log(`[LOG] Received keyword: "${keyword}", trimmed to: "${trimmedKeyword}"`);
 
-    // Optional: Add validation to prevent duplicates if needed
     const existingKeyword = await Keyword.findOne({ keyword: trimmedKeyword });
     
-    // <-- ADDED LOGS to see what findOne returns
     if (existingKeyword) {
       console.log(`[LOG] Found existing keyword:`, JSON.stringify(existingKeyword, null, 2));
       return res.status(409).json({ message: 'Keyword already exists' });
@@ -47,25 +49,33 @@ app.post('/api/keywords', async (req, res) => {
     const newKeyword = new Keyword({ keyword: trimmedKeyword });
     await newKeyword.save();
     
-    console.log(`[LOG] Successfully saved new keyword:`, JSON.stringify(newKeyword, null, 2)); // <-- ADDED LOG
+    console.log(`[LOG] Successfully saved new keyword:`, JSON.stringify(newKeyword, null, 2));
 
     res.status(201).json(newKeyword);
 
   } catch (error) {
-     if (error.code === 11000) { // Should be caught above, but as a fallback
-       console.error('[ERROR] Duplicate key error (11000):', error.message); // <-- ADDED LOG
+     if (error.code === 11000) { 
+       console.error('[ERROR] Duplicate key error (11000):', error.message);
        return res.status(409).json({ message: 'Keyword already exists' });
      }
-    console.error('Error adding keyword:', error); // <-- This will catch other errors
+    console.error('Error adding keyword:', error);
     res.status(500).json({ message: 'Server error adding keyword' });
   }
 });
 
- // DELETE /api/keywords/:id
+app.get('/api/keywords', async (req, res) => {
+  try {
+    const keywords = await Keyword.find();
+    res.json(keywords);
+  } catch (error) {
+    console.error('Error fetching keywords:', error);
+    res.status(500).json({ message: 'Server error fetching keywords' });
+  }
+});
+
  app.delete('/api/keywords/:id', async (req, res) => {
    try {
      const { id } = req.params;
-     // Add validation for ObjectId format if desired
      if (!mongoose.Types.ObjectId.isValid(id)) {
         return res.status(400).json({ message: 'Invalid Keyword ID format' });
      }
@@ -73,7 +83,12 @@ app.post('/api/keywords', async (req, res) => {
      if (!deletedKeyword) {
        return res.status(404).json({ message: 'Keyword not found' });
      }
-     res.json({ message: 'Keyword deleted successfully' });
+     
+     // Also delete ranking data for this keyword
+     await RankingData.deleteMany({ keywordId: id });
+     console.log(`Deleted ranks for keyword ${id}`);
+
+     res.json({ message: 'Keyword and associated rankings deleted' });
    } catch (error) {
      console.error('Error deleting keyword:', error);
      res.status(500).json({ message: 'Server error deleting keyword' });
@@ -81,21 +96,17 @@ app.post('/api/keywords', async (req, res) => {
  });
 
 
-// --- NEW CONFIGURATION ROUTES ---
-
-// GET /api/config - Fetch the single configuration document
+// --- Configuration Routes ---
 app.get('/api/config', async (req, res) => {
   try {
-    // Find the first (and supposedly only) TargetUrl document
     const config = await TargetUrl.findOne();
     if (!config) {
-      // If no config exists yet, return default empty state
       return res.json({ _id: null, url: '', competitorUrls: [] });
     }
     res.json({
-        _id: config._id, // Send ID for potential updates
+        _id: config._id,
         url: config.url,
-        competitorUrls: config.competitorUrls || [] // Ensure array exists
+        competitorUrls: config.competitorUrls || []
     });
   } catch (error) {
     console.error('Error fetching config:', error);
@@ -103,38 +114,21 @@ app.get('/api/config', async (req, res) => {
   }
 });
 
-// PUT /api/config - Update (or create) the single configuration document
 app.put('/api/config', async (req, res) => {
   try {
     const { url, competitorUrls } = req.body;
-
-    if (!url || !url.trim()) { // Basic validation
+    if (!url || !url.trim()) {
        return res.status(400).json({ message: 'Target URL is required' });
     }
-
-    // Validate competitorUrls is an array of strings (basic)
     if (competitorUrls && !Array.isArray(competitorUrls)) {
         return res.status(400).json({ message: 'Competitor URLs must be an array' });
     }
-    const cleanCompetitorUrls = (competitorUrls || []).map(u => String(u).trim()).filter(Boolean); // Clean the array
-
-    // Use findOneAndUpdate with upsert:true.
-    // The filter {} finds *any* document. Since we expect only one, this works.
-    // If no document exists, it creates one based on the $set and $setOnInsert values.
+    const cleanCompetitorUrls = (competitorUrls || []).map(u => String(u).trim()).filter(Boolean);
     const updatedConfig = await TargetUrl.findOneAndUpdate(
-      {}, // Empty filter - find the first/only document or create if none
-      {
-        $set: { url: url.trim(), competitorUrls: cleanCompetitorUrls }, // Update these fields
-        // $setOnInsert is not strictly needed with upsert if timestamps: true is in schema
-      },
-      {
-        new: true, // Return the updated document
-        upsert: true, // Create the document if it doesn't exist
-        runValidators: true, // Ensure schema validation runs
-        setDefaultsOnInsert: true // Ensure defaults (like timestamps) are set on creation
-      }
+      {},
+      { $set: { url: url.trim(), competitorUrls: cleanCompetitorUrls } },
+      { new: true, upsert: true, runValidators: true, setDefaultsOnInsert: true }
     );
-
     res.json({
         _id: updatedConfig._id,
         url: updatedConfig.url,
@@ -142,17 +136,17 @@ app.put('/api/config', async (req, res) => {
     });
   } catch (error) {
     console.error('Error saving config:', error);
-    // Add more specific error handling if needed (e.g., validation errors)
     res.status(500).json({ message: 'Server error saving configuration' });
   }
 });
 
+
+// --- Ranking Data Routes ---
 app.get('/api/rankings', async (req, res) => {
     try {
         const { keywordId } = req.query;
-        const limitPerUrl = parseInt(req.query.limit, 10) || 2; // Default to fetching current & previous
+        const limitPerUrl = parseInt(req.query.limit, 10) || 2;
 
-        // 1. Fetch relevant keywords
         let keywords;
         if (keywordId) {
             if (!mongoose.Types.ObjectId.isValid(keywordId)) {
@@ -162,20 +156,18 @@ app.get('/api/rankings', async (req, res) => {
             if (!keyword) return res.status(404).json({ message: 'Keyword not found' });
             keywords = [keyword];
         } else {
-            keywords = await Keyword.find().sort({ keyword: 1 }); // Fetch all, sorted
+            keywords = await Keyword.find().sort({ keyword: 1 });
         }
 
         if (!keywords || keywords.length === 0) {
-            return res.json([]); // No keywords to check
+            return res.json([]);
         }
 
-        // 2. Fetch config to know target/competitor URLs
         const config = await TargetUrl.findOne();
         const targetUrl = config?.url || null;
         const competitorUrls = config?.competitorUrls || [];
         const allUrls = targetUrl ? [targetUrl, ...competitorUrls] : [...competitorUrls];
 
-        // 3. Process each keyword
         const results = [];
         for (const keyword of keywords) {
             const keywordRankings = {
@@ -184,41 +176,35 @@ app.get('/api/rankings', async (req, res) => {
                 urlData: []
             };
 
-            // Fetch the latest 'limitPerUrl' checks for *this keyword*, sorted newest first
             const latestChecks = await RankingData.find({ keywordId: keyword._id })
                 .sort({ checkDate: -1 })
-                // Limit fetch slightly more than needed in case some URLs weren't present in all checks
                 .limit(allUrls.length * limitPerUrl);
 
-            // Group by URL to easily find current/previous
             const ranksByUrl = {};
             for (const check of latestChecks) {
                 if (!ranksByUrl[check.url]) {
                     ranksByUrl[check.url] = [];
                 }
-                // Only store up to 'limitPerUrl' ranks per URL
                 if (ranksByUrl[check.url].length < limitPerUrl) {
                      ranksByUrl[check.url].push({ position: check.position, date: check.checkDate });
                 }
             }
 
-            // 4. Calculate current rank and change for each tracked URL
             for (const url of allUrls) {
-                const ranks = ranksByUrl[url] || []; // Get ranks for this URL, or empty array
-                const currentRankData = ranks[0]; // Newest rank (if any)
-                const previousRankData = ranks[1]; // Previous rank (if any)
+                const ranks = ranksByUrl[url] || [];
+                const currentRankData = ranks[0];
+                const previousRankData = ranks[1];
 
-                let change = null; // 'NC' (No Change), number (e.g., +2), or 'New'/'Gone'
+                let change = null;
 
                 if (currentRankData && previousRankData) {
                     const diff = previousRankData.position - currentRankData.position;
                     change = diff === 0 ? 'NC' : (diff > 0 ? `+${diff}` : `${diff}`);
                 } else if (currentRankData && !previousRankData) {
-                    change = 'New'; // Was not ranked in the previous check we fetched
+                    change = 'New';
                 } else if (!currentRankData && previousRankData) {
-                    change = 'Gone'; // Was ranked previously, but not now
+                    change = 'Gone';
                 }
-                 // If neither exists, change remains null
 
                 keywordRankings.urlData.push({
                     url: url,
@@ -228,7 +214,6 @@ app.get('/api/rankings', async (req, res) => {
                     change: change
                 });
             }
-             // Sort urlData placing targetUrl first (optional)
              keywordRankings.urlData.sort((a, b) => {
                  if (a.isTarget) return -1;
                  if (b.isTarget) return 1;
@@ -249,36 +234,34 @@ app.get('/api/rankings', async (req, res) => {
 app.post('/api/rankings', async (req, res) => {
     try {
         const rankingEntries = req.body;
-
-        // Basic validation: Check if it's an array
         if (!Array.isArray(rankingEntries)) {
-            return res.status(400).json({ message: 'Request body must be an array of ranking entries.' });
+            return res.status(400).json({ message: 'Request body must be an array.' });
         }
-
-    
-        const validEntries = rankingEntries.filter(entry =>
-             entry.keywordId && mongoose.Types.ObjectId.isValid(entry.keywordId) &&
-             entry.url && typeof entry.url === 'string' &&
-             typeof entry.position === 'number' && entry.position > 0
-            // checkDate is optional, defaults to now in schema
-        );
-         if (validEntries.length !== rankingEntries.length) {
-            console.warn('Some invalid ranking entries were filtered out.');
-        }
-
         if (rankingEntries.length === 0) {
              return res.status(200).json({ message: 'No valid ranking entries to insert.' });
         }
 
-        // Use insertMany for efficiency
-        const result = await RankingData.insertMany(rankingEntries, { ordered: false }); // ordered: false allows valid entries to insert even if some fail
-
+        const result = await RankingData.insertMany(rankingEntries, { ordered: false });
         res.status(201).json({ message: `Inserted ${result.length} ranking entries.` });
 
     } catch (error) {
         console.error('Error saving ranking data:', error);
         res.status(500).json({ message: 'Server error saving ranking data' });
     }
+});
+
+
+// --- ROUTE TO TRIGGER RANK CHECK ---
+app.post('/api/check-ranks', async (req, res) => {
+  console.log('Received request to /api/check-ranks');
+  
+  // Don't wait for the whole job to finish, just start it
+  checkAllKeywords()
+    .then(result => console.log('Rank check job completed in background.', result.message))
+    .catch(err => console.error('Rank check job failed in background:', err));
+
+  // Respond immediately to the frontend
+  res.status(202).json({ message: 'Rank checking job started.' });
 });
 
 

@@ -11,6 +11,7 @@
   --text-main: #121212;
   --text-secondary: #555555;
   --border-color: #dddddd;
+  --button-text: #ffffff;
 }
 
 /* 🌙 Dark Theme Overrides (applied when the 'dark-theme' class is added to <html>) */
@@ -20,6 +21,7 @@
   --text-main: #e2e8f0;    /* Light text */
   --text-secondary: #a0aec0; /* Lighter secondary text */
   --border-color: #4a5568;
+  --button-text: #ffffff;
 }
 
 /* Apply base styles using the variables */
